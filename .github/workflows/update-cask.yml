@@ -1,0 +1,42 @@
+name: Update cask
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Look up the latest release
+        id: rel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh api repos/m5x5/prototypie/releases/latest --jq .tag_name)
+          version="${tag#v}"
+          current=$(sed -n 's/^  version "\(.*\)"/\1/p' Casks/prototypie.rb)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "changed=$([ "$version" != "$current" ] && echo yes || echo no)" >> "$GITHUB_OUTPUT"
+      - name: Update version and checksum
+        if: steps.rel.outputs.changed == 'yes'
+        env:
+          VERSION: ${{ steps.rel.outputs.version }}
+        run: |
+          url="https://github.com/m5x5/prototypie/releases/download/v${VERSION}/Prototypie-${VERSION}-macos-arm64.dmg"
+          curl -fsSL "$url" -o app.dmg
+          sum=$(sha256sum app.dmg | cut -d' ' -f1)
+          sed -i "s/^  version \".*\"/  version \"${VERSION}\"/; s/^  sha256 \".*\"/  sha256 \"${sum}\"/" Casks/prototypie.rb
+          rm app.dmg
+      - name: Commit
+        if: steps.rel.outputs.changed == 'yes'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "prototypie ${{ steps.rel.outputs.version }}"
+          git push
